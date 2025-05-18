@@ -38,6 +38,6 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: .
-          publish_branch: main
+          publish_branch: gh-pages
           commit_message: "Update site"
           force_orphan: true 
