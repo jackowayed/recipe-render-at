@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+  schedule:
+      - cron: '42 10 * * *'  # Run at 10:42am UTC (2:42am UTC-8) every day
   workflow_dispatch:
 
 permissions:
