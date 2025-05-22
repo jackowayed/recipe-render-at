@@ -131,6 +131,10 @@
 
         .field-value {
             color: #333;
+            text-align: left;
+        }
+
+        .field-value.recipe-text {
             white-space: pre-wrap;
         }
 
@@ -229,7 +233,7 @@
                         {% if field_name.lower() not in ['image', 'photo', 'picture', 'thumbnail', 'name', 'title'] %}
                         <div class="field">
                             <div class="field-label">{{ field_name }}</div>
-                            <div class="field-value">
+                            <div class="field-value{% if field_name.lower() in ['recipe', 'instructions', 'description', 'directions', 'steps', 'method', 'preparation', 'cooking instructions'] %} recipe-text{% endif %}">
                                 {% if field_value is string %}
                                     {% if field_value.startswith('http') %}
                                         <a href="{{ field_value }}" target="_blank">{{ field_value }}</a>
