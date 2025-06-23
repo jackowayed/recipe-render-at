@@ -131,6 +131,7 @@
 
         .field-value {
             color: #333;
+            white-space: pre-wrap;
         }
 
         .field-value img {
@@ -233,7 +234,7 @@
                                     {% if field_value.startswith('http') %}
                                         <a href="{{ field_value }}" target="_blank">{{ field_value }}</a>
                                     {% else %}
-                                        {{ field_value }}
+                                        {{ field_value|replace('\n', '<br>')|safe }}
                                     {% endif %}
                                 {% elif field_value is sequence and not field_value is string %}
                                     {% if field_value[0] is mapping and field_value[0].url %}
