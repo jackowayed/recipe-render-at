@@ -1,4 +1,6 @@
 import os
+import hashlib
+import json
 import requests
 from airtable import Airtable
 from jinja2 import Environment, FileSystemLoader
@@ -7,7 +9,7 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-def get_table_name(base_id, table_id, api_key):
+def get_table_metadata(base_id, table_id, api_key):
     url = f"https://api.airtable.com/v0/meta/bases/{base_id}/tables"
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -18,8 +20,9 @@ def get_table_name(base_id, table_id, api_key):
         tables = response.json()['tables']
         for table in tables:
             if table['id'] == table_id:
-                return table['name']
-    return "Recipe Collection"  # Fallback to generic name if we can't get the real one
+                return table
+    response.raise_for_status()
+    raise ValueError(f"Table {table_id!r} was not found in base {base_id!r}")
 
 def fetch_airtable_data():
     # Get Airtable credentials from environment variables
@@ -31,7 +34,7 @@ def fetch_airtable_data():
         raise ValueError("Missing required environment variables. Please set AIRTABLE_BASE_ID, AIRTABLE_TABLE_NAME, and AIRTABLE_API_KEY")
     
     # Get the actual table name
-    table_name = get_table_name(base_id, table_id, api_key)
+    table = get_table_metadata(base_id, table_id, api_key)
     
     # Initialize Airtable client
     airtable = Airtable(base_id, table_id, api_key=api_key)
@@ -48,7 +51,40 @@ def fetch_airtable_data():
         return ''  # Default to empty string if no name/title found
     
     records.sort(key=get_sort_key)
-    return records, table_name
+    return records, table
+
+
+def meaningful_record(record, fields_by_name):
+    """Return stable source data, excluding formula results and expiring URLs."""
+    fields = {}
+    for name, value in record['fields'].items():
+        field_type = fields_by_name.get(name, {}).get('type')
+        if field_type == 'formula':
+            continue
+        if field_type == 'multipleAttachments':
+            value = [
+                {key: attachment.get(key) for key in ('id', 'filename', 'size', 'type')}
+                for attachment in value
+            ]
+        fields[name] = value
+    return {'id': record['id'], 'fields': fields}
+
+
+def content_hash(records, table, template_path='template.html'):
+    """Hash only changes that should cause a new public deployment."""
+    fields_by_name = {field['name']: field for field in table.get('fields', [])}
+    payload = {
+        'table_name': table['name'],
+        # Including the schema catches formula-definition and empty-field changes,
+        # while excluding each formula's evaluated result avoids clock-driven noise.
+        'schema': table.get('fields', []),
+        'records': [meaningful_record(record, fields_by_name) for record in records],
+    }
+    digest = hashlib.sha256()
+    digest.update(json.dumps(payload, sort_keys=True, separators=(',', ':')).encode())
+    with open(template_path, 'rb') as template_file:
+        digest.update(template_file.read())
+    return digest.hexdigest()
 
 def generate_html(records, table_name):
     # Set up Jinja2 environment
@@ -63,12 +99,11 @@ def generate_html(records, table_name):
         f.write(html_content)
 
 def main():
-    try:
-        records, table_name = fetch_airtable_data()
-        generate_html(records, table_name)
-        print("Successfully generated index.html")
-    except Exception as e:
-        print(f"Error: {str(e)}")
+    records, table = fetch_airtable_data()
+    generate_html(records, table['name'])
+    with open('content-hash.txt', 'w') as hash_file:
+        hash_file.write(content_hash(records, table) + '\n')
+    print("Successfully generated index.html and content-hash.txt")
 
 if __name__ == "__main__":
-    main() 
+    main()

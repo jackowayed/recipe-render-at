@@ -5,27 +5,36 @@ on:
     branches:
       - main
   schedule:
-      - cron: '42 10 * * *'  # Run at 10:42am UTC (2:42am UTC-8) every day
+      - cron: '42 10 * * 1'  # Check Mondays; use manual dispatch for an immediate refresh
   workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: Deploy even when meaningful content is unchanged
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 jobs:
   build-and-deploy:
+    concurrency:
+      group: pages-deployment
+      cancel-in-progress: true
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.x'
+          cache: pip
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Generate site
@@ -39,12 +48,29 @@ jobs:
         run: |
           mkdir deploy
           cp index.html deploy/
+          cp content-hash.txt deploy/
+
+      - name: Check for meaningful changes
+        id: changes
+        env:
+          FORCE_DEPLOY: ${{ inputs.force_deploy || 'false' }}
+        run: |
+          git fetch origin gh-pages --depth=1
+          previous_hash="$(git show origin/gh-pages:content-hash.txt 2>/dev/null || true)"
+          current_hash="$(cat deploy/content-hash.txt)"
+          if [[ "$FORCE_DEPLOY" == "true" || "$current_hash" != "$previous_hash" ]]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+            echo "No meaningful Airtable or template changes; skipping Pages deployment."
+          fi
 
       - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
+        if: steps.changes.outputs.deploy == 'true'
+        uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./deploy
           publish_branch: gh-pages
           commit_message: "Update site"
-          keep_files: false 
+          keep_files: false
