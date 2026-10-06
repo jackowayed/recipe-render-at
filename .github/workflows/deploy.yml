@@ -13,16 +13,26 @@ on:
         type: boolean
         default: false
 
+# No third-party actions: checkout + setup-python + cache (first-party) build
+# the site, and GitHub's own Pages actions publish it. Requires repo
+# Settings -> Pages -> Build and deployment Source = "GitHub Actions".
 permissions:
-  contents: write
+  contents: read
+  pages: write
+  id-token: write
+
+# Per GitHub's Pages starter workflow: never cancel an in-flight deployment.
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 jobs:
-  build-and-deploy:
-    concurrency:
-      group: pages-deployment
-      cancel-in-progress: true
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      deploy: ${{ steps.changes.outputs.deploy }}
+      content_hash: ${{ steps.changes.outputs.content_hash }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -44,20 +54,24 @@ jobs:
           AIRTABLE_TABLE_NAME: ${{ secrets.AIRTABLE_TABLE_NAME }}
         run: python fetch_airtable.py
 
-      - name: Prepare deployment
-        run: |
-          mkdir deploy
-          cp index.html deploy/
-          cp content-hash.txt deploy/
+      # Artifact deploys have no gh-pages branch to diff against, so the
+      # last-deployed fingerprint lives in the Actions cache instead.
+      - name: Restore last-deployed hash
+        uses: actions/cache/restore@v6
+        with:
+          path: previous-hash.txt
+          key: deployed-content-hash-${{ github.run_id }}
+          restore-keys: |
+            deployed-content-hash-
 
       - name: Check for meaningful changes
         id: changes
         env:
           FORCE_DEPLOY: ${{ inputs.force_deploy || 'false' }}
         run: |
-          git fetch origin gh-pages --depth=1
-          previous_hash="$(git show origin/gh-pages:content-hash.txt 2>/dev/null || true)"
-          current_hash="$(cat deploy/content-hash.txt)"
+          current_hash="$(cat content-hash.txt)"
+          previous_hash="$(cat previous-hash.txt 2>/dev/null || true)"
+          echo "content_hash=$current_hash" >> "$GITHUB_OUTPUT"
           if [[ "$FORCE_DEPLOY" == "true" || "$current_hash" != "$previous_hash" ]]; then
             echo "deploy=true" >> "$GITHUB_OUTPUT"
           else
@@ -65,12 +79,38 @@ jobs:
             echo "No meaningful Airtable or template changes; skipping Pages deployment."
           fi
 
-      - name: Deploy to GitHub Pages
+      - name: Prepare Pages artifact
         if: steps.changes.outputs.deploy == 'true'
-        uses: peaceiris/actions-gh-pages@v4
+        run: |
+          mkdir site
+          cp index.html site/
+
+      - name: Upload Pages artifact
+        if: steps.changes.outputs.deploy == 'true'
+        uses: actions/upload-pages-artifact@v5
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./deploy
-          publish_branch: gh-pages
-          commit_message: "Update site"
-          keep_files: false
+          path: ./site
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
+
+      # Record the fingerprint only after a successful deployment, so a failed
+      # deploy is retried (with a fresh upload) on the next run.
+      - name: Save deployed hash
+        run: printf '%s' '${{ needs.build.outputs.content_hash }}' > previous-hash.txt
+
+      - name: Cache deployed hash
+        uses: actions/cache/save@v6
+        with:
+          path: previous-hash.txt
+          key: deployed-content-hash-${{ github.run_id }}

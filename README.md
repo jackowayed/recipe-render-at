@@ -36,10 +36,10 @@ This will create an `index.html` file that you can open in any web browser. The 
 
 It also creates `content-hash.txt`, a deployment fingerprint which ignores Airtable
 formula results and expiring attachment URLs. The GitHub Actions workflow checks
-that fingerprint weekly and skips the `gh-pages` update (and therefore the Pages
-build) when only those volatile values changed. Run the workflow manually after an
-Airtable edit if you do not want to wait for the weekly check; its `force_deploy`
-option can also refresh formula output without a meaningful-data change.
+that fingerprint weekly and skips the Pages deployment when only those volatile
+values changed. Run the workflow manually after an Airtable edit if you do not
+want to wait for the weekly check; its `force_deploy` option can also refresh
+formula output without a meaningful-data change.
 
 ## Features
 
