@@ -1,0 +1,9 @@
+version: 2
+updates:
+  # Keeps GitHub Actions on floating major tags (e.g. actions/checkout@v5)
+  # current: secure patches/minors flow in automatically, majors arrive as PRs.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
